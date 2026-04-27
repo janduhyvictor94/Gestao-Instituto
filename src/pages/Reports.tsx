@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, Download, BarChart3, Users, CalendarDays, TrendingUp, DollarSign } from 'lucide-react';
+import { FileText, Download, BarChart3, Users, CalendarDays, TrendingUp, DollarSign, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Clinic, DailyAttendance, Appointment, FinancialRecord, LeadsDaily, PatientClassification, FinancialCategory, LEAD_SOURCES, FINANCIAL_TYPES, FINANCIAL_STATUSES, APPOINTMENT_STATUSES } from '../types';
 import { exportToPDF, exportAttendanceCSV, exportFinancialCSV, exportLeadsCSV } from '../lib/export';
@@ -15,6 +15,7 @@ const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', c
 export default function Reports({ clinic }: Props) {
   const today = new Date().toISOString().split('T')[0];
   const [period, setPeriod] = useState<Period>('month');
+  const [selectedDate, setSelectedDate] = useState(today); // Data base para os filtros
   const [customStart, setCustomStart] = useState(today);
   const [customEnd, setCustomEnd] = useState(today);
   const [loading, setLoading] = useState(false);
@@ -30,20 +31,29 @@ export default function Reports({ clinic }: Props) {
   }>({ attendance: [], appointments: [], financial: [], leads: [], totalIncome: 0, totalExpense: 0, balance: 0, loaded: false });
 
   const getRange = () => {
-    const now = new Date();
-    if (period === 'day') return { start: `${today}T00:00:00`, end: `${today}T23:59:59`, startDate: today, endDate: today };
+    const d = new Date(selectedDate + 'T12:00:00');
+    
+    if (period === 'day') {
+      return { start: `${selectedDate}T00:00:00`, end: `${selectedDate}T23:59:59`, startDate: selectedDate, endDate: selectedDate };
+    }
+    
     if (period === 'week') {
-      const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());
-      const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6);
-      const s = startOfWeek.toISOString().split('T')[0]; const e = endOfWeek.toISOString().split('T')[0];
+      const startOfWeek = new Date(d);
+      startOfWeek.setDate(d.getDate() - d.getDay()); // Domingo
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6); // Sábado
+      const s = startOfWeek.toISOString().split('T')[0];
+      const e = endOfWeek.toISOString().split('T')[0];
       return { start: `${s}T00:00:00`, end: `${e}T23:59:59`, startDate: s, endDate: e };
     }
+    
     if (period === 'month') {
-      const s = `${today.slice(0, 7)}-01`;
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const e = `${today.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`;
+      const s = `${selectedDate.slice(0, 7)}-01`;
+      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const e = `${selectedDate.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`;
       return { start: `${s}T00:00:00`, end: `${e}T23:59:59`, startDate: s, endDate: e };
     }
+    
     return { start: `${customStart}T00:00:00`, end: `${customEnd}T23:59:59`, startDate: customStart, endDate: customEnd };
   };
 
@@ -53,7 +63,7 @@ export default function Reports({ clinic }: Props) {
 
     const [attRes, apptRes, finRes, leadsRes] = await Promise.all([
       supabase.from('daily_attendance').select('*, classification:patient_classifications(name)').eq('clinic_id', clinic.id).gte('date', startDate).lte('date', endDate),
-      supabase.from('appointments').select('*').eq('clinic_id', clinic.id).gte('scheduled_at', start).lte('scheduled_at', end).order('scheduled_at'),
+      supabase.from('appointments').select('*').eq('clinic_id', clinic.id).gte('date', startDate).lte('date', endDate).order('time'),
       supabase.from('financial_records').select('*, category:financial_categories(name)').eq('clinic_id', clinic.id).gte('due_date', startDate).lte('due_date', endDate),
       supabase.from('leads_daily').select('*').eq('clinic_id', clinic.id).gte('date', startDate).lte('date', endDate),
     ]);
@@ -68,7 +78,7 @@ export default function Reports({ clinic }: Props) {
 
     setData({
       attendance: attendance.map(a => ({ classification: a.classification?.name || '—', count: a.count, date: a.date })),
-      appointments: appointments.map(a => ({ title: a.title, contact_name: a.contact_name, scheduled_at: a.scheduled_at, status: a.status })),
+      appointments: appointments.map(a => ({ title: a.title, contact_name: (a as any).contact_name || '—', scheduled_at: `${a.date}T${a.time}`, status: (a as any).status || (a.completed ? 'completed' : 'pending') })),
       financial: financial.map(f => ({ description: f.description, type: f.type, category: f.category?.name || '', amount: f.amount, status: f.status, due_date: f.due_date })),
       leads: leads.map(l => ({ source: l.source, count: l.count, date: l.date })),
       totalIncome, totalExpense, balance: totalIncome - totalExpense, loaded: true,
@@ -147,36 +157,83 @@ export default function Reports({ clinic }: Props) {
     <div className="space-y-6">
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
         <h3 className="font-semibold text-gray-900 mb-4 text-lg">Configurar Relatório</h3>
-        <div className="flex gap-2 flex-wrap mb-4">
+        
+        {/* Seleção do Tipo de Período */}
+        <div className="flex gap-2 flex-wrap mb-6">
           {(['day', 'week', 'month', 'custom'] as Period[]).map(p => (
             <button key={p} onClick={() => setPeriod(p)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${period === p ? 'text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${period === p ? 'text-white shadow-md scale-105' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               style={period === p ? { backgroundColor: clinic.color } : {}}>
               {periodNames[p]}
             </button>
           ))}
         </div>
-        {period === 'custom' && (
-          <div className="flex gap-3 mb-4">
+
+        {/* Seletores de Data Dinâmicos */}
+        <div className="flex flex-wrap gap-4 mb-6 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+          {period === 'day' && (
             <div>
-              <label className="text-xs text-gray-500 block mb-1">De</label>
-              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Escolher Dia</label>
+              <div className="relative">
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                  className="pl-9 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-emerald-500 bg-white" />
+              </div>
             </div>
+          )}
+
+          {period === 'week' && (
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Até</label>
-              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
-                className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Escolher Semana (Selecione qualquer dia dela)</label>
+              <div className="relative">
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                  className="pl-9 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-emerald-500 bg-white" />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {period === 'month' && (
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Escolher Mês e Ano</label>
+              <div className="relative">
+                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="month" value={selectedDate.slice(0, 7)} onChange={e => setSelectedDate(e.target.value + '-01')}
+                  className="pl-9 border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-emerald-500 bg-white" />
+              </div>
+            </div>
+          )}
+
+          {period === 'custom' && (
+            <>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">De</label>
+                <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-emerald-500 bg-white" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Até</label>
+                <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold focus:ring-2 focus:ring-emerald-500 bg-white" />
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <p className="text-sm text-gray-500">Período: <strong className="text-gray-900">{periodLabel}</strong></p>
+          <div>
+            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Período Selecionado:</p>
+            <p className="text-lg font-black text-gray-900">{periodLabel}</p>
+          </div>
           <button onClick={loadData} disabled={loading}
-            className="flex items-center gap-2 text-white px-5 py-2.5 rounded-xl text-sm font-medium disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 text-white px-6 py-3 rounded-xl text-sm font-black uppercase shadow-lg disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-95"
             style={{ backgroundColor: clinic.color }}>
-            <BarChart3 size={16} />
-            {loading ? 'Carregando...' : 'Gerar Relatório'}
+            {loading ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <BarChart3 size={18} />
+            )}
+            Gerar Relatório
           </button>
         </div>
       </div>
@@ -184,42 +241,42 @@ export default function Reports({ clinic }: Props) {
       {data.loaded && (
         <>
           {/* Financial Summary */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
-              <p className="text-gray-500 text-sm">Receita Recebida</p>
-              <p className="text-emerald-700 text-2xl font-bold mt-1">{fmt(data.totalIncome)}</p>
+              <p className="text-emerald-600 text-xs font-black uppercase tracking-wider">Receita Recebida</p>
+              <p className="text-emerald-700 text-2xl font-black mt-1">{fmt(data.totalIncome)}</p>
             </div>
             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5">
-              <p className="text-gray-500 text-sm">Despesas Pagas</p>
-              <p className="text-rose-600 text-2xl font-bold mt-1">{fmt(data.totalExpense)}</p>
+              <p className="text-rose-600 text-xs font-black uppercase tracking-wider">Despesas Pagas</p>
+              <p className="text-rose-600 text-2xl font-black mt-1">{fmt(data.totalExpense)}</p>
             </div>
             <div className={`rounded-2xl p-5 border-2 ${data.balance >= 0 ? 'bg-teal-50 border-teal-200' : 'bg-rose-50 border-rose-200'}`}>
-              <p className="text-gray-500 text-sm">Saldo Líquido</p>
-              <p className={`text-2xl font-bold mt-1 ${data.balance >= 0 ? 'text-teal-700' : 'text-rose-700'}`}>{fmt(data.balance)}</p>
+              <p className={`${data.balance >= 0 ? 'text-teal-600' : 'text-rose-600'} text-xs font-black uppercase tracking-wider`}>Saldo Líquido</p>
+              <p className={`text-2xl font-black mt-1 ${data.balance >= 0 ? 'text-teal-700' : 'text-rose-700'}`}>{fmt(data.balance)}</p>
             </div>
           </div>
 
           {/* Key Metrics */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
               <Users size={20} className="text-blue-600 mx-auto mb-1" />
-              <p className="text-3xl font-bold text-blue-600">{totalPatients}</p>
-              <p className="text-gray-500 text-xs mt-1">Atendimentos</p>
+              <p className="text-3xl font-black text-blue-600">{totalPatients}</p>
+              <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-1">Atendimentos</p>
             </div>
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
               <CalendarDays size={20} className="mx-auto mb-1" style={{ color: clinic.color }} />
-              <p className="text-3xl font-bold" style={{ color: clinic.color }}>{data.appointments.length}</p>
-              <p className="text-gray-500 text-xs mt-1">Compromissos</p>
+              <p className="text-3xl font-black" style={{ color: clinic.color }}>{data.appointments.length}</p>
+              <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-1">Compromissos</p>
             </div>
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
               <TrendingUp size={20} className="text-amber-600 mx-auto mb-1" />
-              <p className="text-3xl font-bold text-amber-600">{totalLeads}</p>
-              <p className="text-gray-500 text-xs mt-1">Leads</p>
+              <p className="text-3xl font-black text-amber-600">{totalLeads}</p>
+              <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-1">Leads</p>
             </div>
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 text-center">
               <DollarSign size={20} className="text-gray-600 mx-auto mb-1" />
-              <p className="text-3xl font-bold text-gray-700">{data.financial.length}</p>
-              <p className="text-gray-500 text-xs mt-1">Lançamentos</p>
+              <p className="text-3xl font-black text-gray-700">{data.financial.length}</p>
+              <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mt-1">Lançamentos</p>
             </div>
           </div>
 
@@ -228,19 +285,19 @@ export default function Reports({ clinic }: Props) {
             {/* Attendance Breakdown */}
             {Object.keys(attendanceByClass).length > 0 && (
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <h3 className="font-black text-gray-900 mb-4 flex items-center gap-2 uppercase text-sm">
                   <Users size={17} className="text-blue-600" />
                   Atendimentos por Classificação
                 </h3>
                 <div className="space-y-3">
                   {Object.entries(attendanceByClass).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
                     <div key={name} className="flex items-center justify-between">
-                      <span className="text-sm text-gray-700">{name}</span>
+                      <span className="text-sm font-bold text-gray-600 uppercase tracking-tighter">{name}</span>
                       <div className="flex items-center gap-3">
                         <div className="w-32 bg-gray-100 rounded-full h-2">
                           <div className="h-2 rounded-full bg-blue-500" style={{ width: `${totalPatients > 0 ? (count / totalPatients) * 100 : 0}%` }} />
                         </div>
-                        <span className="text-sm font-bold text-blue-600 w-8 text-right">{count}</span>
+                        <span className="text-sm font-black text-blue-600 w-8 text-right">{count}</span>
                       </div>
                     </div>
                   ))}
@@ -251,19 +308,19 @@ export default function Reports({ clinic }: Props) {
             {/* Leads Breakdown */}
             {Object.keys(leadsBySource).length > 0 && (
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <h3 className="font-black text-gray-900 mb-4 flex items-center gap-2 uppercase text-sm">
                   <TrendingUp size={17} className="text-amber-600" />
                   Leads por Origem
                 </h3>
                 <div className="space-y-3">
                   {Object.entries(leadsBySource).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
                     <div key={name} className="flex items-center justify-between">
-                      <span className="text-sm text-gray-700">{name}</span>
+                      <span className="text-sm font-bold text-gray-600 uppercase tracking-tighter">{name}</span>
                       <div className="flex items-center gap-3">
                         <div className="w-32 bg-gray-100 rounded-full h-2">
                           <div className="h-2 rounded-full bg-amber-500" style={{ width: `${totalLeads > 0 ? (count / totalLeads) * 100 : 0}%` }} />
                         </div>
-                        <span className="text-sm font-bold text-amber-600 w-8 text-right">{count}</span>
+                        <span className="text-sm font-black text-amber-600 w-8 text-right">{count}</span>
                       </div>
                     </div>
                   ))}
@@ -274,7 +331,7 @@ export default function Reports({ clinic }: Props) {
             {/* Financial by Category */}
             {Object.keys(financialByCategory).length > 0 && (
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 lg:col-span-2">
-                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <h3 className="font-black text-gray-900 mb-4 flex items-center gap-2 uppercase text-sm">
                   <DollarSign size={17} className="text-teal-600" />
                   Financeiro por Categoria
                 </h3>
@@ -282,19 +339,19 @@ export default function Reports({ clinic }: Props) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100">
-                        <th className="text-left py-2 px-3 text-gray-500 font-medium">Categoria</th>
-                        <th className="text-right py-2 px-3 text-emerald-600 font-medium">Receita</th>
-                        <th className="text-right py-2 px-3 text-rose-600 font-medium">Despesa</th>
-                        <th className="text-right py-2 px-3 text-gray-700 font-medium">Líquido</th>
+                        <th className="text-left py-3 px-3 text-gray-400 font-black uppercase tracking-tighter">Categoria</th>
+                        <th className="text-right py-3 px-3 text-emerald-600 font-black uppercase tracking-tighter">Receita</th>
+                        <th className="text-right py-3 px-3 text-rose-600 font-black uppercase tracking-tighter">Despesa</th>
+                        <th className="text-right py-3 px-3 text-gray-700 font-black uppercase tracking-tighter">Líquido</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(financialByCategory).map(([name, vals]) => (
                         <tr key={name} className="border-b border-gray-50">
-                          <td className="py-2 px-3 text-gray-900">{name}</td>
-                          <td className="py-2 px-3 text-right text-emerald-700 font-medium">{vals.income > 0 ? fmt(vals.income) : '—'}</td>
-                          <td className="py-2 px-3 text-right text-rose-600 font-medium">{vals.expense > 0 ? fmt(vals.expense) : '—'}</td>
-                          <td className={`py-2 px-3 text-right font-bold ${vals.income - vals.expense >= 0 ? 'text-teal-700' : 'text-rose-700'}`}>
+                          <td className="py-3 px-3 text-gray-900 font-bold uppercase text-xs">{name}</td>
+                          <td className="py-3 px-3 text-right text-emerald-700 font-bold">{vals.income > 0 ? fmt(vals.income) : '—'}</td>
+                          <td className="py-3 px-3 text-right text-rose-600 font-bold">{vals.expense > 0 ? fmt(vals.expense) : '—'}</td>
+                          <td className={`py-3 px-3 text-right font-black ${vals.income - vals.expense >= 0 ? 'text-teal-700' : 'text-rose-700'}`}>
                             {fmt(vals.income - vals.expense)}
                           </td>
                         </tr>
@@ -308,30 +365,29 @@ export default function Reports({ clinic }: Props) {
 
           {/* Export Section */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h3 className="font-semibold text-gray-900 mb-4 text-lg flex items-center gap-2">
+            <h3 className="font-black text-gray-900 mb-4 text-lg flex items-center gap-2 uppercase">
               <Download size={18} style={{ color: clinic.color }} />
               Exportar Relatório
             </h3>
-            <p className="text-sm text-gray-500 mb-4">Exporte os dados do período <strong>{periodLabel}</strong> para análise externa.</p>
+            <p className="text-sm text-gray-500 mb-4 font-medium">Exporte os dados do período <strong>{periodLabel}</strong> para análise externa.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <button onClick={handleExportPDF}
-                className="flex items-center justify-center gap-2 bg-rose-600 text-white px-4 py-3 rounded-xl text-sm font-medium hover:bg-rose-700 transition-colors">
+                className="flex items-center justify-center gap-2 bg-rose-600 text-white px-4 py-3 rounded-xl text-xs font-black uppercase shadow-md hover:bg-rose-700 transition-all">
                 <FileText size={16} /> Exportar PDF
               </button>
               <button onClick={exportFullExcel}
-                className="flex items-center justify-center gap-2 bg-teal-600 text-white px-4 py-3 rounded-xl text-sm font-medium hover:bg-teal-700 transition-colors">
+                className="flex items-center justify-center gap-2 bg-teal-600 text-white px-4 py-3 rounded-xl text-xs font-black uppercase shadow-md hover:bg-teal-700 transition-all">
                 <Download size={16} /> Excel Completo
               </button>
               <button onClick={() => exportAttendanceCSV(data.attendance)}
-                className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl text-xs font-black uppercase shadow-md hover:bg-blue-700 transition-all">
                 <Download size={16} /> Atendimentos
               </button>
               <button onClick={() => exportFinancialCSV(data.financial)}
-                className="flex items-center justify-center gap-2 bg-gray-700 text-white px-4 py-3 rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors">
+                className="flex items-center justify-center gap-2 bg-gray-700 text-white px-4 py-3 rounded-xl text-xs font-black uppercase shadow-md hover:bg-gray-800 transition-all">
                 <Download size={16} /> Financeiro
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-3">PDF abre para impressão. CSV/Excel pode ser aberto no Excel, Google Sheets ou LibreOffice.</p>
           </div>
         </>
       )}

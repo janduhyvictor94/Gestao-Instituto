@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, TrendingUp, TrendingDown, DollarSign, CreditCard as Edit, Trash2, Check, AlertTriangle, Search } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { Plus, TrendingUp, TrendingDown, DollarSign, CreditCard as Edit, Trash2, Check, AlertTriangle, Search, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Clinic, FinancialRecord, FinancialCategory, FINANCIAL_TYPES, FINANCIAL_STATUSES } from '../types';
 import Modal from '../components/Modal';
@@ -29,8 +29,13 @@ const statusColors: Record<string, string> = {
   cancelled: 'bg-gray-100 text-gray-600',
 };
 
+type ViewMode = 'day' | 'month' | 'year';
+
 export default function Financial({ clinic }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [date, setDate] = useState(todayStr); // Data base para navegação
   const [tab, setTab] = useState<'expense' | 'income' | 'paid'>('expense');
   const [records, setRecords] = useState<FinancialRecord[]>([]);
   const [categories, setCategories] = useState<FinancialCategory[]>([]);
@@ -41,7 +46,7 @@ export default function Financial({ clinic }: Props) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     const [recRes, catRes] = await Promise.all([
       supabase.from('financial_records').select('*, category:financial_categories(id,name,color,type)').eq('clinic_id', clinic.id).order('due_date', { ascending: false }),
@@ -50,13 +55,29 @@ export default function Financial({ clinic }: Props) {
     setRecords((recRes.data as FinancialRecord[]) || []);
     setCategories((catRes.data as FinancialCategory[]) || []);
     setLoading(false);
+  }, [clinic.id]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Lógica de Navegação por Setas
+  const navigate = (dir: 'prev' | 'next') => {
+    const d = new Date(date + 'T12:00:00');
+    if (viewMode === 'day') d.setDate(d.getDate() + (dir === 'next' ? 1 : -1));
+    else if (viewMode === 'month') d.setMonth(d.getMonth() + (dir === 'next' ? 1 : -1));
+    else if (viewMode === 'year') d.setFullYear(d.getFullYear() + (dir === 'next' ? 1 : -1));
+    setDate(d.toISOString().split('T')[0]);
   };
 
-  useEffect(() => { fetchData(); }, [clinic.id]);
+  // Filtragem inteligente por Dia, Mês ou Ano
+  const filteredByPeriod = records.filter(r => {
+    if (viewMode === 'day') return r.due_date === date;
+    if (viewMode === 'month') return r.due_date.startsWith(date.slice(0, 7));
+    return r.due_date.startsWith(date.slice(0, 4));
+  });
 
-  const filteredRecords = records.filter(r => {
-    if (tab === 'expense') return r.type === 'expense' && r.status !== 'paid' && r.status !== 'cancelled';
-    if (tab === 'income') return r.type === 'income' && r.status !== 'paid' && r.status !== 'cancelled';
+  const filteredRecords = filteredByPeriod.filter(r => {
+    if (tab === 'expense') return r.type === 'expense' && r.status !== 'cancelled';
+    if (tab === 'income') return r.type === 'income' && r.status !== 'cancelled';
     return r.status === 'paid';
   }).filter(r => {
     if (!search) return true;
@@ -65,14 +86,29 @@ export default function Financial({ clinic }: Props) {
       ((r.category as FinancialCategory)?.name || '').toLowerCase().includes(q);
   });
 
-  const totalExpenses = records.filter(r => r.type === 'expense' && r.status !== 'paid' && r.status !== 'cancelled').reduce((s, r) => s + r.amount, 0);
-  const totalIncome = records.filter(r => r.type === 'income' && r.status !== 'paid' && r.status !== 'cancelled').reduce((s, r) => s + r.amount, 0);
-  const totalPaid = records.filter(r => r.status === 'paid').reduce((s, r) => s + r.amount, 0);
-  const overdueCount = records.filter(r => r.status === 'pending' && new Date(r.due_date) < new Date(today)).length;
+  // Cálculos dos Cards baseados no período selecionado
+  const totalExpensesPending = filteredByPeriod
+    .filter(r => r.type === 'expense' && r.status !== 'paid' && r.status !== 'cancelled')
+    .reduce((s, r) => s + r.amount, 0);
+
+  const totalIncomePending = filteredByPeriod
+    .filter(r => r.type === 'income' && r.status !== 'paid' && r.status !== 'cancelled')
+    .reduce((s, r) => s + r.amount, 0);
+
+  const totalIncomePaid = filteredByPeriod
+    .filter(r => r.type === 'income' && r.status === 'paid')
+    .reduce((s, r) => s + r.amount, 0);
+
+  const totalExpensePaid = filteredByPeriod
+    .filter(r => r.type === 'expense' && r.status === 'paid')
+    .reduce((s, r) => s + r.amount, 0);
+
+  const netBalance = totalIncomePaid - totalExpensePaid;
+  const overdueCount = filteredByPeriod.filter(r => r.status === 'pending' && new Date(r.due_date) < new Date(todayStr)).length;
 
   const openCreate = (type: string) => {
     setEditing(null);
-    setForm({ ...emptyForm, type, due_date: today });
+    setForm({ ...emptyForm, type, due_date: todayStr });
     setModalOpen(true);
   };
 
@@ -91,7 +127,7 @@ export default function Financial({ clinic }: Props) {
     const payload = {
       clinic_id: clinic.id, category_id: form.category_id || null, type: form.type,
       description: form.description, amount: parseFloat(form.amount) || 0,
-      status: form.status, due_date: form.due_date || today,
+      status: form.status, due_date: form.due_date || todayStr,
       paid_at: form.status === 'paid' ? new Date().toISOString() : null, notes: form.notes,
     };
     if (editing) {
@@ -113,7 +149,12 @@ export default function Financial({ clinic }: Props) {
     fetchData();
   };
 
-  const filteredCategories = categories.filter(c => c.type === form.type);
+  const periodLabel = () => {
+    const d = new Date(date + 'T12:00:00');
+    if (viewMode === 'day') return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+    if (viewMode === 'month') return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return d.getFullYear();
+  };
 
   return (
     <div className="space-y-5">
@@ -128,15 +169,34 @@ export default function Financial({ clinic }: Props) {
             <Plus size={16} /> Receita
           </button>
         </div>
+
+        {/* Seletor de Período com Setas */}
+        <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-gray-100 shadow-sm">
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg mr-2">
+            {(['day', 'month', 'year'] as ViewMode[]).map(m => (
+              <button key={m} onClick={() => setViewMode(m)}
+                className={`px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-tighter transition-all ${viewMode === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>
+                {m === 'day' ? 'Dia' : m === 'month' ? 'Mês' : 'Ano'}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate('prev')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"><ChevronLeft size={18} /></button>
+            <span className="text-sm font-black text-gray-700 min-w-[120px] text-center uppercase">
+              {periodLabel()}
+            </span>
+            <button onClick={() => navigate('next')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"><ChevronRight size={18} /></button>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center"><TrendingDown size={20} className="text-rose-600" /></div>
             <div>
-              <p className="text-gray-500 text-xs">Despesas Pendentes</p>
-              <p className="text-rose-600 font-bold text-lg">{fmt(totalExpenses)}</p>
+              <p className="text-gray-500 text-xs">A Pagar no Período</p>
+              <p className="text-rose-600 font-bold text-lg">{fmt(totalExpensesPending)}</p>
             </div>
           </div>
         </div>
@@ -144,17 +204,23 @@ export default function Financial({ clinic }: Props) {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center"><TrendingUp size={20} className="text-emerald-600" /></div>
             <div>
-              <p className="text-gray-500 text-xs">Receitas Pendentes</p>
-              <p className="text-emerald-700 font-bold text-lg">{fmt(totalIncome)}</p>
+              <p className="text-gray-500 text-xs">A Receber no Período</p>
+              <p className="text-emerald-700 font-bold text-lg">{fmt(totalIncomePending)}</p>
             </div>
           </div>
         </div>
+        
+        {/* Card de Saldo Líquido (Inteligente) */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center"><DollarSign size={20} className="text-teal-600" /></div>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${netBalance >= 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+              <DollarSign size={20} className={netBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'} />
+            </div>
             <div>
-              <p className="text-gray-500 text-xs">Total Concluído</p>
-              <p className="text-teal-700 font-bold text-lg">{fmt(totalPaid)}</p>
+              <p className="text-gray-500 text-xs">Saldo (Pago)</p>
+              <p className={`font-bold text-lg ${netBalance >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                {netBalance < 0 && '- '}{fmt(Math.abs(netBalance))}
+              </p>
             </div>
           </div>
         </div>
@@ -163,20 +229,20 @@ export default function Financial({ clinic }: Props) {
       {overdueCount > 0 && (
         <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3">
           <AlertTriangle size={18} className="text-rose-600" />
-          <p className="text-rose-700 text-sm font-medium">{overdueCount} registro(s) vencido(s)</p>
+          <p className="text-rose-700 text-sm font-medium">{overdueCount} registro(s) vencido(s) neste período</p>
         </div>
       )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-          <button onClick={() => setTab('expense')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === 'expense' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-            Despesas ({records.filter(r => r.type === 'expense' && r.status !== 'paid' && r.status !== 'cancelled').length})
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl shadow-sm">
+          <button onClick={() => setTab('expense')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${tab === 'expense' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
+            Despesas ({filteredByPeriod.filter(r => r.type === 'expense' && r.status !== 'cancelled').length})
           </button>
-          <button onClick={() => setTab('income')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === 'income' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-            Receitas ({records.filter(r => r.type === 'income' && r.status !== 'paid' && r.status !== 'cancelled').length})
+          <button onClick={() => setTab('income')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${tab === 'income' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
+            Receitas ({filteredByPeriod.filter(r => r.type === 'income' && r.status !== 'cancelled').length})
           </button>
-          <button onClick={() => setTab('paid')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === 'paid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-            Concluídos ({records.filter(r => r.status === 'paid').length})
+          <button onClick={() => setTab('paid')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${tab === 'paid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
+            Concluídos ({filteredByPeriod.filter(r => r.status === 'paid').length})
           </button>
         </div>
         <div className="relative w-56">
@@ -187,54 +253,54 @@ export default function Financial({ clinic }: Props) {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
+        <div className="flex justify-center py-16"><div className="w-8 h-8 border-[3px] border-slate-200 border-t-emerald-500 rounded-full animate-spin" /></div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {filteredRecords.length === 0 ? (
-            <div className="flex flex-col items-center py-16 text-gray-400">
-              <DollarSign size={40} className="mb-3 opacity-30" />
-              <p>Nenhum registro encontrado</p>
+            <div className="flex flex-col items-center py-24 text-gray-300">
+              <DollarSign size={48} className="mb-3 opacity-20" />
+              <p className="font-bold uppercase tracking-widest text-xs">Vazio neste período</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredRecords.map(r => {
-                const isOverdue = r.status === 'pending' && new Date(r.due_date) < new Date(today);
+                const isOverdue = r.status === 'pending' && new Date(r.due_date) < new Date(todayStr);
                 const cat = r.category as FinancialCategory | null;
                 return (
-                  <div key={r.id} className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors ${isOverdue ? 'bg-rose-50/50' : ''}`}>
+                  <div key={r.id} className={`flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors ${isOverdue ? 'bg-rose-50/30' : ''}`}>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900">{r.description}</p>
-                      <div className="flex gap-2 mt-0.5 flex-wrap">
-                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${r.type === 'income' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                      <p className="font-bold text-gray-900">{r.description}</p>
+                      <div className="flex gap-3 mt-1 flex-wrap items-center">
+                        <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${r.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}>
                           {FINANCIAL_TYPES[r.type]}
                         </span>
                         {cat && (
-                          <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ backgroundColor: cat.color + '20', color: cat.color }}>
-                            {cat.name}
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1" style={{ backgroundColor: cat.color + '15', color: cat.color }}>
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cat.color }} /> {cat.name}
                           </span>
                         )}
-                        <span className={`text-xs ${isOverdue ? 'text-rose-600 font-medium' : 'text-gray-400'}`}>
+                        <span className={`text-[10px] font-bold uppercase ${isOverdue ? 'text-rose-600' : 'text-gray-400'}`}>
                           Vence: {new Date(r.due_date + 'T12:00:00').toLocaleDateString('pt-BR')}
                         </span>
                         {r.paid_at && (
-                          <span className="text-xs text-emerald-600">
+                          <span className="text-[10px] font-bold text-emerald-600 uppercase">
                             Pago em: {new Date(r.paid_at).toLocaleDateString('pt-BR')}
                           </span>
                         )}
                       </div>
                     </div>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${statusColors[r.status] || 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full flex-shrink-0 border ${statusColors[r.status] || 'bg-gray-100 text-gray-600'}`}>
                       {FINANCIAL_STATUSES[r.status] || r.status}
                     </span>
-                    <p className={`font-semibold text-sm flex-shrink-0 ${r.type === 'income' ? 'text-emerald-700' : 'text-rose-600'}`}>{fmt(r.amount)}</p>
-                    <div className="flex gap-1 flex-shrink-0">
+                    <p className={`font-black text-sm flex-shrink-0 ${r.type === 'income' ? 'text-emerald-700' : 'text-rose-600'}`}>{fmt(r.amount)}</p>
+                    <div className="flex gap-1 flex-shrink-0 ml-2">
                       {r.status === 'pending' && (
-                        <button onClick={() => handleMarkPaid(r)} className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50" title="Marcar como pago">
-                          <Check size={14} />
+                        <button onClick={() => handleMarkPaid(r)} className="p-2 rounded-xl text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all" title="Marcar como pago">
+                          <Check size={16} />
                         </button>
                       )}
-                      <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50"><Edit size={14} /></button>
-                      <button onClick={() => handleDelete(r.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50"><Trash2 size={14} /></button>
+                      <button onClick={() => openEdit(r)} className="p-2 rounded-xl text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-all"><Edit size={16} /></button>
+                      <button onClick={() => handleDelete(r.id)} className="p-2 rounded-xl text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all"><Trash2 size={16} /></button>
                     </div>
                   </div>
                 );
@@ -248,55 +314,50 @@ export default function Financial({ clinic }: Props) {
         <Modal title={editing ? 'Editar Registro' : `Nova ${form.type === 'expense' ? 'Despesa' : 'Receita'}`} onClose={() => setModalOpen(false)}>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Tipo</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Tipo</label>
               <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value, category_id: '' })}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:ring-2 focus:ring-emerald-500">
                 {Object.entries(FINANCIAL_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Categoria</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Categoria</label>
               <select value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:ring-2 focus:ring-emerald-500">
                 <option value="">Sem categoria</option>
-                {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {categories.filter(c => c.type === form.type).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Descrição *</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Descrição *</label>
               <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-emerald-500" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Valor (R$) *</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Valor (R$) *</label>
                 <input type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black focus:ring-2 focus:ring-emerald-500" />
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Vencimento</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Vencimento</label>
                 <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-emerald-500" />
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Status</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Status</label>
               <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                className="w-full border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:ring-2 focus:ring-emerald-500">
                 {Object.entries(FINANCIAL_STATUSES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1">Observações</label>
-              <textarea rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
-            </div>
-            <div className="flex gap-3 pt-1">
-              <button onClick={() => setModalOpen(false)} className="flex-1 border border-gray-200 text-gray-700 rounded-xl py-2.5 text-sm font-medium hover:bg-gray-50">Cancelar</button>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setModalOpen(false)} className="flex-1 border-2 border-gray-100 py-3 rounded-xl text-[10px] font-black uppercase text-gray-400 hover:bg-gray-50 transition-all">Cancelar</button>
               <button onClick={handleSave} disabled={saving || !form.description.trim() || !form.amount}
-                className="flex-1 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50"
+                className="flex-1 text-white rounded-xl py-3 text-[10px] font-black uppercase shadow-lg disabled:opacity-50 transition-all active:scale-95"
                 style={{ backgroundColor: clinic.color }}>
-                {saving ? 'Salvando...' : 'Salvar'}
+                {saving ? 'Processando...' : 'Salvar Registro'}
               </button>
             </div>
           </div>

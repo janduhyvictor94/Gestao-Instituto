@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, DollarSign, Trash2, CheckCircle2, Tag, X } from 'lucide-react';
 import { Clinic } from '../types';
 import Modal from '../components/Modal';
-import { supabase } from '../lib/supabase'; // Importação do banco de dados
+import { supabase } from '../lib/supabase';
 
 interface Category {
   id: string;
@@ -55,7 +55,7 @@ export default function Appointments({ clinic }: Props) {
     description: ''
   });
 
-  // BUSCA DADOS DO SUPABASE
+  // BUSCA DADOS DO SUPABASE (Versão Corrigida para datas e categorias)
   const fetchData = async () => {
     setLoading(true);
     
@@ -67,17 +67,7 @@ export default function Appointments({ clinic }: Props) {
         .eq('clinic_id', clinic.id)
         .order('name');
       
-      // Se você ainda não tiver categorias cadastradas no Supabase, coloca as de exemplo
-      if (catsData && catsData.length > 0) {
-        setCategories(catsData);
-      } else {
-        setCategories([
-          { id: 'cat-1', name: 'Custos Fixos (Aluguel/Água/Luz)' },
-          { id: 'cat-2', name: 'Pagamento de Funcionários' },
-          { id: 'cat-3', name: 'Marketing e Anúncios' },
-          { id: 'cat-4', name: 'Insumos e Materiais Clínicos' }
-        ]);
-      }
+      setCategories(catsData || []);
 
       // 2. Busca Compromissos da Agenda no Banco
       let query = supabase.from('appointments').select('*').eq('clinic_id', clinic.id);
@@ -85,11 +75,20 @@ export default function Appointments({ clinic }: Props) {
       if (view === 'day') {
         query = query.eq('date', date);
       } else {
-        const currentMonth = date.slice(0, 7);
-        query = query.gte('date', `${currentMonth}-01`).lte('date', `${currentMonth}-31`);
+        const currentMonth = date.slice(0, 7); // Pega "AAAA-MM"
+        const [year, month] = currentMonth.split('-').map(Number);
+        
+        // CALCULA O ÚLTIMO DIA REAL DO MÊS (Evita o erro do dia 31 em Abril, Junho, etc)
+        const lastDay = new Date(year, month, 0).getDate();
+        
+        query = query
+          .gte('date', `${currentMonth}-01`)
+          .lte('date', `${currentMonth}-${String(lastDay).padStart(2, '0')}`);
       }
 
-      const { data: appsData } = await query.order('time');
+      const { data: appsData, error: appsError } = await query.order('time');
+      if (appsError) throw appsError;
+
       setAppointments(appsData || []);
     } catch (error) {
       console.error("Erro de conexão com Supabase:", error);
@@ -142,7 +141,7 @@ export default function Appointments({ clinic }: Props) {
         }).eq('id', editingAppId);
 
       } else {
-        // CRIA NO SUPABASE (Com suporte a parcelas)
+        // CRIA NO SUPABASE (Com suporte a parcelas mensais)
         if (form.is_recurring && form.type === 'financial' && form.installments > 1) {
           const batch = [];
           const baseDate = new Date(form.date + 'T12:00:00');
@@ -183,13 +182,13 @@ export default function Appointments({ clinic }: Props) {
         }
       }
     } catch (error) {
-      console.error("Erro ao salvar:", error);
+      console.error("Erro ao salvar no Supabase:", error);
     }
 
     setSaving(false);
     setModalOpen(false);
     setEditingAppId(null);
-    fetchData(); // Recarrega os dados fresquinhos do Supabase
+    fetchData(); // Sincroniza com o banco
   };
 
   const toggleComplete = async (appId: string, currentStatus: boolean) => {

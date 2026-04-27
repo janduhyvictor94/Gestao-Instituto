@@ -12,7 +12,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Clinic, DailyAttendance, Appointment, FinancialRecord, Alert, LeadsDaily, DailyReport, PatientClassification, Goal, GOAL_TYPES, APPOINTMENT_STATUSES } from '../types';
+import { Clinic, DailyAttendance, Appointment, FinancialRecord, Alert, LeadsDaily, DailyReport, PatientClassification, Goal, GOAL_TYPES } from '../types';
 
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
@@ -39,76 +39,83 @@ export default function Dashboard({ clinic, onNavigate }: Props) {
     setLoading(true);
     const startOfMonth = `${today.slice(0, 7)}-01`;
 
-    // 1. BUSCA DADOS LOCAIS (Enquanto não há Supabase)
-    const savedApps = localStorage.getItem(`appointments_${clinic.id}`);
-    const allLocalApps = savedApps ? JSON.parse(savedApps) : [];
-    
-    // Filtra agendamentos de hoje para a lista de Agenda
-    const todayApps = allLocalApps.filter((a: any) => a.date === today);
-    
-    // Transforma agendamentos pendentes de hoje em Alertas (como você pediu)
-    const pendingAsAlerts = todayApps
-      .filter((a: any) => !a.completed)
-      .map((a: any) => ({
-        id: a.id,
-        title: `Compromisso: ${a.title}`,
-        due_at: `${a.date}T${a.time}:00`,
-        status: 'pending',
-        clinic_id: clinic.id
-      }));
+    try {
+      // BUSCA INTEGRAL NO SUPABASE (Filtro por clinic.id em todas as consultas)
+      const [attRes, expRes, incRes, leadsRes, reportRes, monthAttRes, goalsRes, apptRes, dbAlertsRes] = await Promise.all([
+        supabase.from('daily_attendance').select('*, classification:patient_classifications(name,color)').eq('clinic_id', clinic.id).eq('date', today),
+        supabase.from('financial_records').select('*, category:financial_categories(name)').eq('clinic_id', clinic.id).eq('type', 'expense').eq('status', 'pending').order('due_date'),
+        supabase.from('financial_records').select('*, category:financial_categories(name)').eq('clinic_id', clinic.id).eq('type', 'income').eq('status', 'pending').order('due_date'),
+        supabase.from('leads_daily').select('*').eq('clinic_id', clinic.id).eq('date', today),
+        supabase.from('daily_reports').select('*').eq('clinic_id', clinic.id).eq('date', today).maybeSingle(),
+        supabase.from('daily_attendance').select('count').eq('clinic_id', clinic.id).gte('date', startOfMonth),
+        supabase.from('goals').select('*').eq('clinic_id', clinic.id).eq('month', currentMonth),
+        supabase.from('appointments').select('*').eq('clinic_id', clinic.id).eq('date', today).order('time'),
+        supabase.from('alerts').select('*').eq('clinic_id', clinic.id).eq('status', 'pending').order('due_at')
+      ]);
 
-    // 2. BUSCA NO SUPABASE (Para quando você ativar)
-    const [attRes, expRes, incRes, leadsRes, reportRes, monthAttRes, goalsRes] = await Promise.all([
-      supabase.from('daily_attendance').select('*, classification:patient_classifications(name,color)').eq('clinic_id', clinic.id).eq('date', today),
-      supabase.from('financial_records').select('*, category:financial_categories(name)').eq('clinic_id', clinic.id).eq('type', 'expense').eq('status', 'pending').order('due_date'),
-      supabase.from('financial_records').select('*, category:financial_categories(name)').eq('clinic_id', clinic.id).eq('type', 'income').eq('status', 'pending').order('due_date'),
-      supabase.from('leads_daily').select('*').eq('clinic_id', clinic.id).eq('date', today),
-      supabase.from('daily_reports').select('*').eq('clinic_id', clinic.id).eq('date', today).maybeSingle(),
-      supabase.from('daily_attendance').select('count').eq('clinic_id', clinic.id).gte('date', startOfMonth),
-      supabase.from('goals').select('*').eq('clinic_id', clinic.id).eq('month', currentMonth),
-    ]);
+      const todayApps = (apptRes.data as Appointment[]) || [];
+      
+      // MANTÉM A LÓGICA DE TRANSFORMAR AGENDAMENTOS EM ALERTAS
+      const apptAsAlerts = todayApps
+        .filter(a => !a.completed)
+        .map(a => ({
+          id: a.id,
+          title: `Compromisso: ${a.title}`,
+          due_at: `${a.date}T${a.time}`,
+          status: 'pending',
+          clinic_id: clinic.id
+        })) as Alert[];
 
-    setAttendance((attRes.data as DailyAttendance[]) || []);
-    setAppointments(todayApps); // Usa dados locais
-    setAlerts(pendingAsAlerts); // Usa agendamentos pendentes como alertas
-    setExpenses((expRes.data as FinancialRecord[]) || []);
-    setIncomes((incRes.data as FinancialRecord[]) || []);
-    setLeads((leadsRes.data as LeadsDaily[]) || []);
-    setReport((reportRes.data as DailyReport) || null);
-    setTotalPatients((monthAttRes.data || []).reduce((s: number, r: { count: number }) => s + r.count, 0));
-    setGoals((goalsRes.data as Goal[]) || []);
-    setLoading(false);
+      const dbAlerts = (dbAlertsRes.data as Alert[]) || [];
+
+      setAttendance((attRes.data as DailyAttendance[]) || []);
+      setAppointments(todayApps);
+      setAlerts([...dbAlerts, ...apptAsAlerts]);
+      setExpenses((expRes.data as FinancialRecord[]) || []);
+      setIncomes((incRes.data as FinancialRecord[]) || []);
+      setLeads((leadsRes.data as LeadsDaily[]) || []);
+      setReport((reportRes.data as DailyReport) || null);
+      setTotalPatients((monthAttRes.data || []).reduce((s, r) => s + r.count, 0));
+      setGoals((goalsRes.data as Goal[]) || []);
+
+    } catch (error) {
+      console.error("Erro ao carregar dados do Dashboard:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [clinic.id, today, currentMonth]);
 
   useEffect(() => {
     load();
-    // Sincroniza se você mudar algo na página de Agenda e voltar
-    window.addEventListener('storage', load);
     window.addEventListener('focus', load);
-    return () => {
-      window.removeEventListener('storage', load);
-      window.removeEventListener('focus', load);
-    };
+    return () => window.removeEventListener('focus', load);
   }, [load]);
 
-  // Função para concluir alertas/agendamentos e retirá-los da lista
+  // FUNÇÃO DE CONCLUSÃO ATUALIZADA PARA SUPABASE
   const handleCompleteAppointment = async (id: string) => {
-    const savedApps = localStorage.getItem(`appointments_${clinic.id}`);
-    if (savedApps) {
-      const allApps = JSON.parse(savedApps);
-      const updated = allApps.map((a: any) => a.id === id ? { ...a, completed: true } : a);
-      localStorage.setItem(`appointments_${clinic.id}`, JSON.stringify(updated));
-      
-      // Notifica o sistema da mudança e recarrega
-      window.dispatchEvent(new Event('storage'));
-      load();
+    try {
+      // Primeiro tenta marcar como concluído na tabela de agendamentos
+      const { error: apptError } = await supabase
+        .from('appointments')
+        .update({ completed: true })
+        .eq('id', id);
+
+      // Se der erro (não for um agendamento), tenta marcar na tabela de alertas
+      if (apptError) {
+        await supabase
+          .from('alerts')
+          .update({ status: 'completed' })
+          .eq('id', id);
+      }
+
+      load(); // Recarrega para atualizar a interface
+    } catch (error) {
+      console.error("Erro ao concluir tarefa:", error);
     }
   };
 
   const todayPatients = attendance.reduce((s, a) => s + a.count, 0);
   const todayLeads = leads.reduce((s, l) => s + l.count, 0);
-  const overdueExpenses = expenses.filter(p => new Date(p.due_date) < new Date(today));
-  const overdueIncomes = incomes.filter(r => new Date(r.due_date) < new Date(today));
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-[3px] border-slate-200 border-t-emerald-500 rounded-full animate-spin" /></div>;
@@ -220,15 +227,15 @@ export default function Dashboard({ clinic, onNavigate }: Props) {
                 <div key={a.id} className="flex items-center gap-3 p-3 bg-slate-50/80 rounded-xl border border-slate-100 group">
                   <div className="w-12 text-center flex-shrink-0">
                     <p className="text-xs font-bold text-slate-700">
-                      {(a as any).time || new Date(a.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      {a.time ? a.time.slice(0, 5) : '—'}
                     </p>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium truncate ${(a as any).completed ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{a.title}</p>
+                    <p className={`text-sm font-medium truncate ${a.completed ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{a.title}</p>
                   </div>
                   <button 
                     onClick={() => handleCompleteAppointment(a.id)}
-                    className={`p-1 rounded-lg transition-all ${(a as any).completed ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500 opacity-0 group-hover:opacity-100'}`}
+                    className={`p-1 rounded-lg transition-all ${a.completed ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500 opacity-0 group-hover:opacity-100'}`}
                   >
                     <CheckCircle2 size={16} />
                   </button>
@@ -261,7 +268,7 @@ export default function Dashboard({ clinic, onNavigate }: Props) {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-900">{alert.title}</p>
                       <p className={`text-[11px] mt-0.5 font-medium ${isPast ? 'text-rose-500' : 'text-amber-600'}`}>
-                        {alert.due_at.includes('T') ? new Date(alert.due_at).toLocaleString('pt-BR') : alert.due_at}
+                        {alert.due_at.includes('T') ? new Date(alert.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : alert.due_at}
                       </p>
                     </div>
                     <button 
@@ -278,7 +285,7 @@ export default function Dashboard({ clinic, onNavigate }: Props) {
         </div>
       </div>
 
-      {/* Financial Overview - (Apenas layout mantido conforme pedido) */}
+      {/* Financial Overview */}
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100/80">
           <div className="flex items-center justify-between mb-4">
