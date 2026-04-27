@@ -1,3 +1,5 @@
+// src/types/index.ts
+
 export type Page =
   | 'dashboard'
   | 'attendance'
@@ -15,7 +17,7 @@ export interface Clinic {
   name: string;
   slug: string;
   color: string;
-  icon: string;
+  icon?: string;
   created_at: string;
 }
 
@@ -35,21 +37,31 @@ export interface DailyAttendance {
   classification_id: string;
   date: string;
   count: number;
-  notes: string;
+  notes?: string;
   created_at: string;
   classification?: PatientClassification;
 }
 
+// INTERFACE CORRIGIDA: Adicionados campos date, time, completed e financeiros
 export interface Appointment {
   id: string;
   clinic_id: string;
   title: string;
-  contact_name: string;
-  contact_phone: string;
-  scheduled_at: string;
-  duration_minutes: number;
-  status: string;
-  notes: string;
+  date: string;       // Necessário para Dashboard e Agenda
+  time: string;       // Necessário para Dashboard e Agenda
+  completed: boolean; // Necessário para Dashboard e Agenda
+  contact_name?: string;
+  contact_phone?: string;
+  type: 'common' | 'financial';
+  amount: number;
+  category_id?: string;
+  category_name?: string;
+  is_recurring: boolean;
+  current_installment?: number;
+  total_installments?: number;
+  description?: string;
+  scheduled_at?: string;
+  notes?: string;
   created_at: string;
 }
 
@@ -59,7 +71,7 @@ export interface LeadsDaily {
   date: string;
   source: string;
   count: number;
-  notes: string;
+  notes?: string;
   created_at: string;
 }
 
@@ -92,7 +104,7 @@ export interface FinancialRecord {
   status: string;
   due_date: string;
   paid_at: string | null;
-  notes: string;
+  notes?: string;
   created_at: string;
   category?: FinancialCategory;
 }
@@ -106,7 +118,8 @@ export interface Invoice {
   date: string;
   description: string;
   category: string;
-  notes: string;
+  notes?: string;
+  file_url?: string; // Campo para o anexo da nota fiscal
   created_at: string;
 }
 
@@ -114,11 +127,11 @@ export interface Alert {
   id: string;
   clinic_id: string;
   title: string;
-  description: string;
+  description?: string;
   due_at: string;
-  type: string;
+  type?: string;
   status: string;
-  appointment_id: string | null;
+  appointment_id?: string | null;
   created_at: string;
 }
 
@@ -129,22 +142,15 @@ export interface Goal {
   month: string;
   target: number;
   current: number;
-  notes: string;
+  notes?: string;
   created_at: string;
 }
 
 export const GOAL_TYPES: Record<string, string> = {
   patients: 'Atendimentos',
-  revenue: 'Receita (R$)',
+  revenue: 'Faturamento',
   leads: 'Leads',
   appointments: 'Compromissos',
-};
-
-export const GOAL_TYPE_ICONS: Record<string, string> = {
-  patients: 'Users',
-  revenue: 'DollarSign',
-  leads: 'TrendingUp',
-  appointments: 'CalendarDays',
 };
 
 export const LEAD_SOURCES: Record<string, string> = {
@@ -158,11 +164,9 @@ export const LEAD_SOURCES: Record<string, string> = {
 };
 
 export const APPOINTMENT_STATUSES: Record<string, string> = {
-  scheduled: 'Agendado',
-  confirmed: 'Confirmado',
-  completed: 'Realizado',
+  pending: 'Pendente',
+  completed: 'Concluído',
   cancelled: 'Cancelado',
-  no_show: 'Não Compareceu',
 };
 
 export const FINANCIAL_TYPES: Record<string, string> = {

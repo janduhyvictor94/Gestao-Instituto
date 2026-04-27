@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, TrendingUp, TrendingDown, DollarSign, CreditCard as Edit, Trash2, Check, AlertTriangle, Search, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, DollarSign, CreditCard as Edit, Trash2, Check, AlertTriangle, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Clinic, FinancialRecord, FinancialCategory, FINANCIAL_TYPES, FINANCIAL_STATUSES } from '../types';
 import Modal from '../components/Modal';
@@ -35,7 +35,7 @@ export default function Financial({ clinic }: Props) {
   const todayStr = new Date().toISOString().split('T')[0];
   
   const [viewMode, setViewMode] = useState<ViewMode>('month');
-  const [date, setDate] = useState(todayStr); // Data base para navegação
+  const [date, setDate] = useState(todayStr);
   const [tab, setTab] = useState<'expense' | 'income' | 'paid'>('expense');
   const [records, setRecords] = useState<FinancialRecord[]>([]);
   const [categories, setCategories] = useState<FinancialCategory[]>([]);
@@ -59,7 +59,6 @@ export default function Financial({ clinic }: Props) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Lógica de Navegação por Setas
   const navigate = (dir: 'prev' | 'next') => {
     const d = new Date(date + 'T12:00:00');
     if (viewMode === 'day') d.setDate(d.getDate() + (dir === 'next' ? 1 : -1));
@@ -68,7 +67,6 @@ export default function Financial({ clinic }: Props) {
     setDate(d.toISOString().split('T')[0]);
   };
 
-  // Filtragem inteligente por Dia, Mês ou Ano
   const filteredByPeriod = records.filter(r => {
     if (viewMode === 'day') return r.due_date === date;
     if (viewMode === 'month') return r.due_date.startsWith(date.slice(0, 7));
@@ -86,7 +84,6 @@ export default function Financial({ clinic }: Props) {
       ((r.category as FinancialCategory)?.name || '').toLowerCase().includes(q);
   });
 
-  // Cálculos dos Cards baseados no período selecionado
   const totalExpensesPending = filteredByPeriod
     .filter(r => r.type === 'expense' && r.status !== 'paid' && r.status !== 'cancelled')
     .reduce((s, r) => s + r.amount, 0);
@@ -115,8 +112,13 @@ export default function Financial({ clinic }: Props) {
   const openEdit = (r: FinancialRecord) => {
     setEditing(r);
     setForm({
-      type: r.type, category_id: r.category_id || '', description: r.description,
-      amount: String(r.amount), status: r.status, due_date: r.due_date, notes: r.notes,
+      type: r.type,
+      category_id: r.category_id || '',
+      description: r.description,
+      amount: String(r.amount),
+      status: r.status,
+      due_date: r.due_date,
+      notes: r.notes || '', // Garantia de string para evitar erro
     });
     setModalOpen(true);
   };
@@ -153,7 +155,7 @@ export default function Financial({ clinic }: Props) {
     const d = new Date(date + 'T12:00:00');
     if (viewMode === 'day') return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
     if (viewMode === 'month') return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    return d.getFullYear();
+    return String(d.getFullYear());
   };
 
   return (
@@ -170,7 +172,6 @@ export default function Financial({ clinic }: Props) {
           </button>
         </div>
 
-        {/* Seletor de Período com Setas */}
         <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-gray-100 shadow-sm">
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg mr-2">
             {(['day', 'month', 'year'] as ViewMode[]).map(m => (
@@ -210,7 +211,6 @@ export default function Financial({ clinic }: Props) {
           </div>
         </div>
         
-        {/* Card de Saldo Líquido (Inteligente) */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${netBalance >= 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>

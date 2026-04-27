@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Plus, Search, FileText, CreditCard as Edit, Trash2, Paperclip, X, Image as ImageIcon, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Clinic, Invoice } from '../types';
@@ -14,7 +14,7 @@ interface InvoiceForm {
   description: string; 
   category: string; 
   notes: string; 
-  file_url?: string; 
+  file_url: string; 
 }
 
 const emptyForm: InvoiceForm = { 
@@ -40,22 +40,24 @@ export default function Invoices({ clinic }: Props) {
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [form, setForm] = useState<InvoiceForm>(emptyForm);
   const [saving, setSaving] = useState(false);
-  
-  // Novo estado para guardar o arquivo selecionado antes de enviar
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const fetchInvoices = async () => {
+  const fetchInvoices = useCallback(async () => {
     const { data } = await supabase.from('invoices').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false });
     setInvoices(data || []);
     setFiltered(data || []);
     setLoading(false);
-  };
+  }, [clinic.id]);
 
-  useEffect(() => { fetchInvoices(); }, [clinic.id]);
+  useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
 
   useEffect(() => {
     const q = search.toLowerCase();
-    setFiltered(invoices.filter(i => i.number.toLowerCase().includes(q) || i.issuer.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)));
+    setFiltered(invoices.filter(i => 
+      (i.number?.toLowerCase() || '').includes(q) || 
+      (i.issuer?.toLowerCase() || '').includes(q) || 
+      (i.description?.toLowerCase() || '').includes(q)
+    ));
   }, [search, invoices]);
 
   const openCreate = () => { 
@@ -68,14 +70,14 @@ export default function Invoices({ clinic }: Props) {
   const openEdit = (i: Invoice) => {
     setEditing(i);
     setForm({ 
-      number: i.number, 
+      number: i.number || '', 
       issuer: i.issuer, 
       amount: String(i.amount), 
       date: i.date, 
-      description: i.description, 
-      category: i.category, 
-      notes: i.notes,
-      file_url: (i as any).file_url || ''
+      description: i.description || '', 
+      category: i.category || '', 
+      notes: i.notes || '',
+      file_url: i.file_url || '' // Resolvido: agora garante string vazia se for null
     });
     setSelectedFile(null);
     setModalOpen(true);
@@ -87,7 +89,6 @@ export default function Invoices({ clinic }: Props) {
 
     let finalFileUrl = form.file_url;
 
-    // Lógica para enviar o arquivo para o Supabase Storage se o usuário selecionou uma imagem
     if (selectedFile) {
       const fileExt = selectedFile.name.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
@@ -101,9 +102,6 @@ export default function Invoices({ clinic }: Props) {
           .from('invoices')
           .getPublicUrl(fileName);
         finalFileUrl = publicUrlData.publicUrl;
-      } else {
-        console.error("Erro no upload da imagem:", uploadError);
-        alert("Erro ao anexar arquivo. Verifique se o bucket 'invoices' está criado no Supabase.");
       }
     }
 
@@ -170,7 +168,7 @@ export default function Invoices({ clinic }: Props) {
         ) : (
           <div className="divide-y divide-gray-50">
             {filtered.map(inv => {
-              const fileUrl = (inv as any).file_url;
+              const fileUrl = inv.file_url;
               return (
                 <div key={inv.id} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors">
                   <div className="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -207,8 +205,6 @@ export default function Invoices({ clinic }: Props) {
       {modalOpen && (
         <Modal title={editing ? 'Editar Nota Fiscal' : 'Nova Nota Fiscal'} onClose={() => setModalOpen(false)}>
           <div className="space-y-4">
-            
-            {/* Campo de Upload de Anexo */}
             <div className="mb-4">
               <label className="text-sm font-medium text-gray-700 block mb-2">Anexo (Foto ou PDF da Nota)</label>
               {form.file_url && !selectedFile ? (
