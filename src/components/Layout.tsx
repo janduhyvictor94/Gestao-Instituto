@@ -31,7 +31,8 @@ export default function Layout({ currentPage, onNavigate, alertCount, alerts, cl
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
 
-  const now = new Date();
+  // CORREÇÃO DE FUSO HORÁRIO: Força o horário de São Paulo para a saudação e o relógio
+  const now = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
   const greeting = now.getHours() < 12 ? 'Bom dia' : now.getHours() < 18 ? 'Boa tarde' : 'Boa noite';
 
   return (

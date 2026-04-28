@@ -22,7 +22,8 @@ interface Props {
 }
 
 export default function Dashboard({ clinic, onNavigate }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo/Brasília
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const currentMonth = `${today.slice(0, 7)}`;
   const [loading, setLoading] = useState(true);
   const [attendance, setAttendance] = useState<DailyAttendance[]>([]);
