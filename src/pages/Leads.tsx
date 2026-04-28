@@ -56,7 +56,8 @@ interface Props {
 type ViewMode = 'day' | 'month' | 'year';
 
 export default function Leads({ clinic }: Props) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo/Brasília
+  const todayStr = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('day');
   const [date, setDate] = useState(todayStr);
   const [viewMode, setViewMode] = useState<ViewMode>('day');

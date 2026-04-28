@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Users, Minus, FileText, Star, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Users, Minus, FileText, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Clinic, PatientClassification, DailyAttendance, DailyReport } from '../types';
 import Modal from '../components/Modal';
@@ -59,30 +59,13 @@ const getWeekDetails = (dateStr: string) => {
   };
 };
 
-const getWeekString = (dStr: string) => {
-  if (!dStr) return '';
-  const d = new Date(dStr + 'T12:00:00');
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return `${d.getUTCFullYear()}-W${weekNo.toString().padStart(2, '0')}`;
-};
-
-const getDateFromWeek = (weekStr: string) => {
-  if (!weekStr) return new Date().toISOString().split('T')[0];
-  const [y, w] = weekStr.split('-W');
-  const d = new Date(Number(y), 0, 1 + (Number(w) - 1) * 7);
-  const day = d.getDay();
-  d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
-  return d.toISOString().split('T')[0];
-};
-
 interface Props {
   clinic: Clinic;
 }
 
 export default function Attendance({ clinic }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('day');
   const [date, setDate] = useState(today);
   const [classifications, setClassifications] = useState<PatientClassification[]>([]);
@@ -96,17 +79,21 @@ export default function Attendance({ clinic }: Props) {
 
   const fetchData = async () => {
     setLoading(true);
-    const [clsRes, attRes, repRes] = await Promise.all([
+    // Correção do nome da variável: de repRes para reportRes para evitar erro 'Cannot find name'
+    const [clsRes, attRes, reportRes] = await Promise.all([
       supabase.from('patient_classifications').select('*').eq('clinic_id', clinic.id).eq('active', true).order('sort_order'),
       supabase.from('daily_attendance').select('*, classification:patient_classifications(name,color)').eq('clinic_id', clinic.id).eq('date', date),
       supabase.from('daily_reports').select('*').eq('clinic_id', clinic.id).eq('date', date).maybeSingle(),
     ]);
+    
     setClassifications((clsRes.data as PatientClassification[]) || []);
     setAttendance((attRes.data as DailyAttendance[]) || []);
-    setReport((repRes.data as DailyReport) || null);
-    if (repRes.data) {
-      setReportContent((repRes.data as DailyReport).content);
-      setReportRating((repRes.data as DailyReport).rating || 3);
+    
+    // Agora usando o nome correto: reportRes
+    setReport((reportRes.data as DailyReport) || null);
+    if (reportRes.data) {
+      setReportContent((reportRes.data as DailyReport).content);
+      setReportRating((reportRes.data as DailyReport).rating || 3);
     } else {
       setReportContent('');
       setReportRating(3);
@@ -191,7 +178,6 @@ export default function Attendance({ clinic }: Props) {
             <button onClick={() => navigatePeriod('next')} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight size={18} /></button>
             {periodMode === 'week' && (
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${weekDetails.isValid ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
-                <Calendar size={14} className={weekDetails.isValid ? 'text-emerald-600' : 'text-amber-600'} />
                 <span className="text-xs font-bold whitespace-nowrap text-emerald-700">{weekDetails.label} ({weekDetails.interval})</span>
               </div>
             )}

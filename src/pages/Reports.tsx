@@ -13,7 +13,9 @@ interface Props {
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 export default function Reports({ clinic }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo/Brasília
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  
   const [period, setPeriod] = useState<Period>('month');
   const [selectedDate, setSelectedDate] = useState(today); // Data base para os filtros
   const [customStart, setCustomStart] = useState(today);
@@ -42,8 +44,10 @@ export default function Reports({ clinic }: Props) {
       startOfWeek.setDate(d.getDate() - d.getDay()); // Domingo
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(startOfWeek.getDate() + 6); // Sábado
-      const s = startOfWeek.toISOString().split('T')[0];
-      const e = endOfWeek.toISOString().split('T')[0];
+      
+      // Uso do formatador sueco (sv-SE) para garantir o formato YYYY-MM-DD sem drift de fuso
+      const s = new Intl.DateTimeFormat('sv-SE').format(startOfWeek);
+      const e = new Intl.DateTimeFormat('sv-SE').format(endOfWeek);
       return { start: `${s}T00:00:00`, end: `${e}T23:59:59`, startDate: s, endDate: e };
     }
     
@@ -59,7 +63,7 @@ export default function Reports({ clinic }: Props) {
 
   const loadData = async () => {
     setLoading(true);
-    const { start, end, startDate, endDate } = getRange();
+    const { startDate, endDate } = getRange();
 
     const [attRes, apptRes, finRes, leadsRes] = await Promise.all([
       supabase.from('daily_attendance').select('*, classification:patient_classifications(name)').eq('clinic_id', clinic.id).gte('date', startDate).lte('date', endDate),

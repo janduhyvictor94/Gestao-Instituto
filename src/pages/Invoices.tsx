@@ -31,7 +31,9 @@ const emptyForm: InvoiceForm = {
 interface Props { clinic: Clinic; }
 
 export default function Invoices({ clinic }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo/Brasília
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [filtered, setFiltered] = useState<Invoice[]>([]);
   const [search, setSearch] = useState('');
@@ -77,7 +79,7 @@ export default function Invoices({ clinic }: Props) {
       description: i.description || '', 
       category: i.category || '', 
       notes: i.notes || '',
-      file_url: i.file_url || '' // Resolvido: agora garante string vazia se for null
+      file_url: i.file_url || '' 
     });
     setSelectedFile(null);
     setModalOpen(true);

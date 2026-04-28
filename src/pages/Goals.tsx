@@ -34,8 +34,11 @@ interface Props {
 }
 
 export default function Goals({ clinic }: Props) {
-  const today = new Date();
-  const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  // CORREÇÃO DE FUSO HORÁRIO: Garante o mês correto de São Paulo/Brasília
+  const now = new Date();
+  const spDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(now);
+  const currentMonth = spDate.slice(0, 7); 
+
   const [month, setMonth] = useState(currentMonth);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +64,13 @@ export default function Goals({ clinic }: Props) {
 
   const openEdit = (g: Goal) => {
     setEditing(g);
-    setForm({ type: g.type, month: g.month, target: String(g.target), notes: g.notes });
+    // CORREÇÃO DO ERRO TS2322: Adicionado || '' para garantir que notes nunca seja undefined
+    setForm({ 
+      type: g.type, 
+      month: g.month, 
+      target: String(g.target), 
+      notes: g.notes || '' 
+    });
     setModalOpen(true);
   };
 
@@ -73,11 +82,11 @@ export default function Goals({ clinic }: Props) {
       type: form.type,
       month: form.month,
       target: parseFloat(form.target) || 0,
-      current: 0,
+      current: editing ? editing.current : 0,
       notes: form.notes,
     };
     if (editing) {
-      await supabase.from('goals').update({ ...payload, current: editing.current }).eq('id', editing.id);
+      await supabase.from('goals').update(payload).eq('id', editing.id);
     } else {
       await supabase.from('goals').insert(payload);
     }
@@ -110,7 +119,7 @@ export default function Goals({ clinic }: Props) {
         <div className="flex items-center gap-3">
           <input type="month" value={month} onChange={e => setMonth(e.target.value)}
             className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-          <button onClick={() => setMonth(currentMonth)} className="text-xs hover:underline" style={{ color: clinic.color }}>
+          <button onClick={() => setMonth(currentMonth)} className="text-xs font-bold hover:underline" style={{ color: clinic.color }}>
             Mês atual
           </button>
         </div>
@@ -137,7 +146,6 @@ export default function Goals({ clinic }: Props) {
         <div className="bg-white rounded-2xl flex flex-col items-center py-16 text-gray-400 shadow-sm border border-gray-100">
           <Target size={40} className="mb-3 opacity-30" />
           <p>Nenhuma meta cadastrada para este mês</p>
-          <button onClick={openCreate} className="mt-3 text-sm hover:underline" style={{ color: clinic.color }}>Criar meta</button>
         </div>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2">
@@ -183,14 +191,6 @@ export default function Goals({ clinic }: Props) {
                       style={{ width: `${progress}%`, backgroundColor: isComplete ? '#059669' : color }}
                     />
                   </div>
-                  <div className="flex items-center justify-between mt-1.5">
-                    <span className={`text-xs font-bold ${isComplete ? 'text-emerald-600' : 'text-gray-500'}`}>
-                      {isComplete ? 'Meta atingida!' : `${progress}%`}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                      Faltam {isRevenue ? fmt(Math.max(0, g.target - g.current)) : Math.max(0, g.target - g.current)}
-                    </span>
-                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
@@ -201,7 +201,7 @@ export default function Goals({ clinic }: Props) {
                     step={isRevenue ? '0.01' : '1'}
                     value={g.current}
                     onChange={e => updateCurrent(g.id, parseFloat(e.target.value) || 0)}
-                    className="w-24 text-center text-sm border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-24 text-center text-sm border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
                   />
                 </div>
               </div>
