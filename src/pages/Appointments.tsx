@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, DollarSign, Trash2, CheckCircle2, Tag, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Clock, ChevronLeft, ChevronRight, DollarSign, Trash2, CheckCircle2, Tag, X } from 'lucide-react';
 import { Clinic } from '../types';
 import Modal from '../components/Modal';
 import { supabase } from '../lib/supabase';
@@ -32,7 +32,9 @@ const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', c
 interface Props { clinic: Clinic; }
 
 export default function Appointments({ clinic }: Props) {
-  const todayStr = new Date().toISOString().split('T')[0];
+  // CORREÇÃO DE FUSO HORÁRIO: Garante a data correta de São Paulo/Brasília
+  const todayStr = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  
   const [view, setView] = useState<'day' | 'month'>('month');
   const [date, setDate] = useState(todayStr); 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -55,12 +57,9 @@ export default function Appointments({ clinic }: Props) {
     description: ''
   });
 
-  // BUSCA DADOS DO SUPABASE (Versão Corrigida para datas e categorias)
   const fetchData = async () => {
     setLoading(true);
-    
     try {
-      // 1. Busca Categorias Financeiras no Banco
       const { data: catsData } = await supabase
         .from('financial_categories')
         .select('*')
@@ -69,16 +68,13 @@ export default function Appointments({ clinic }: Props) {
       
       setCategories(catsData || []);
 
-      // 2. Busca Compromissos da Agenda no Banco
       let query = supabase.from('appointments').select('*').eq('clinic_id', clinic.id);
       
       if (view === 'day') {
         query = query.eq('date', date);
       } else {
-        const currentMonth = date.slice(0, 7); // Pega "AAAA-MM"
+        const currentMonth = date.slice(0, 7);
         const [year, month] = currentMonth.split('-').map(Number);
-        
-        // CALCULA O ÚLTIMO DIA REAL DO MÊS (Evita o erro do dia 31 em Abril, Junho, etc)
         const lastDay = new Date(year, month, 0).getDate();
         
         query = query
@@ -93,7 +89,6 @@ export default function Appointments({ clinic }: Props) {
     } catch (error) {
       console.error("Erro de conexão com Supabase:", error);
     }
-
     setLoading(false);
   };
 
@@ -128,7 +123,6 @@ export default function Appointments({ clinic }: Props) {
 
     try {
       if (editingAppId) {
-        // ATUALIZA NO SUPABASE
         await supabase.from('appointments').update({
           title: form.title,
           date: form.date,
@@ -141,7 +135,6 @@ export default function Appointments({ clinic }: Props) {
         }).eq('id', editingAppId);
 
       } else {
-        // CRIA NO SUPABASE (Com suporte a parcelas mensais)
         if (form.is_recurring && form.type === 'financial' && form.installments > 1) {
           const batch = [];
           const baseDate = new Date(form.date + 'T12:00:00');
@@ -151,7 +144,7 @@ export default function Appointments({ clinic }: Props) {
             batch.push({
               clinic_id: clinic.id,
               title: form.title,
-              date: nextDate.toISOString().split('T')[0],
+              date: new Intl.DateTimeFormat('sv-SE').format(nextDate),
               time: form.time,
               type: form.type,
               amount: parseFloat(form.amount) || 0,
@@ -188,7 +181,7 @@ export default function Appointments({ clinic }: Props) {
     setSaving(false);
     setModalOpen(false);
     setEditingAppId(null);
-    fetchData(); // Sincroniza com o banco
+    fetchData();
   };
 
   const toggleComplete = async (appId: string, currentStatus: boolean) => {
@@ -207,7 +200,7 @@ export default function Appointments({ clinic }: Props) {
     const d = new Date(date + 'T12:00:00');
     if (view === 'day') d.setDate(d.getDate() + (dir === 'next' ? 1 : -1));
     else d.setMonth(d.getMonth() + (dir === 'next' ? 1 : -1));
-    setDate(d.toISOString().split('T')[0]);
+    setDate(new Intl.DateTimeFormat('sv-SE').format(d));
   };
 
   const renderMonthView = () => {
@@ -238,15 +231,12 @@ export default function Appointments({ clinic }: Props) {
                     onClick={(e: any) => { e.stopPropagation(); openEdit(app); }}
                     className={`group flex items-center justify-between text-[10px] px-1.5 py-1 rounded font-bold transition-all cursor-pointer ${app.completed ? 'opacity-30 grayscale' : ''} ${app.type === 'financial' ? 'bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200' : 'bg-blue-100 text-blue-800 border border-blue-200 hover:bg-blue-200'}`}>
                     <span className="truncate flex-1">{app.type === 'financial' && '$ '}{app.title}</span>
-                    
                     <div className="flex gap-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={(e: any) => { e.stopPropagation(); toggleComplete(app.id, app.completed); }}
+                      <button onClick={(e: any) => { e.stopPropagation(); toggleComplete(app.id, app.completed); }}
                         className={`p-0.5 rounded ${app.completed ? 'text-emerald-600' : 'text-gray-500 hover:text-emerald-600'}`}>
                         <CheckCircle2 size={12} />
                       </button>
-                      <button 
-                        onClick={(e: any) => { e.stopPropagation(); deleteAppointment(app.id); }}
+                      <button onClick={(e: any) => { e.stopPropagation(); deleteAppointment(app.id); }}
                         className="p-0.5 rounded text-gray-500 hover:text-rose-600">
                         <X size={12} />
                       </button>
@@ -287,8 +277,7 @@ export default function Appointments({ clinic }: Props) {
            appointments.length === 0 ? <div className="p-32 text-center text-gray-300 font-bold uppercase tracking-widest">Nenhum compromisso para este dia</div> :
            appointments.map(app => (
             <div key={app.id} onClick={() => openEdit(app)} className={`flex items-center gap-4 p-5 transition-all cursor-pointer ${app.completed ? 'bg-gray-50/50' : 'hover:bg-gray-50'}`}>
-              <button 
-                onClick={(e: any) => { e.stopPropagation(); toggleComplete(app.id, app.completed); }} 
+              <button onClick={(e: any) => { e.stopPropagation(); toggleComplete(app.id, app.completed); }} 
                 className={`transition-all ${app.completed ? 'text-emerald-500 scale-110' : 'text-gray-300 hover:text-emerald-400'}`}>
                 <CheckCircle2 size={28} />
               </button>
@@ -320,7 +309,6 @@ export default function Appointments({ clinic }: Props) {
               <label className="text-xs font-black text-gray-400 uppercase mb-1 block">Título do Compromisso</label>
               <input value={form.title} onChange={e => setForm({...form, title: e.target.value})} className="w-full border-gray-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-emerald-500" placeholder="Ex: Pagar Aluguel ou Reunião" />
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-black text-gray-400 uppercase mb-1 block">Data do Compromisso</label>
@@ -331,7 +319,6 @@ export default function Appointments({ clinic }: Props) {
                 <input type="time" value={form.time} onChange={e => setForm({...form, time: e.target.value})} className="w-full border-gray-200 rounded-xl px-4 py-2.5 font-medium" />
               </div>
             </div>
-            
             <div>
               <label className="text-xs font-black text-gray-400 uppercase mb-1 block">Tipo de Registro</label>
               <select value={form.type} onChange={e => setForm({...form, type: e.target.value as 'common' | 'financial'})} className="w-full border-gray-200 rounded-xl px-4 py-2.5 font-bold" disabled={!!editingAppId}>
@@ -339,7 +326,6 @@ export default function Appointments({ clinic }: Props) {
                 <option value="financial">💰 Registro Financeiro</option>
               </select>
             </div>
-
             {form.type === 'financial' && (
               <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -355,14 +341,12 @@ export default function Appointments({ clinic }: Props) {
                     </select>
                   </div>
                 </div>
-                
                 {!editingAppId && (
                   <>
                     <label className="flex items-center gap-3 cursor-pointer group bg-white/50 p-2 rounded-xl border border-amber-200/50">
                       <input type="checkbox" checked={form.is_recurring} onChange={e => setForm({...form, is_recurring: e.target.checked})} className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500 border-amber-300" />
                       <span className="text-sm font-black text-amber-900 uppercase tracking-tighter">É um pagamento parcelado mensal?</span>
                     </label>
-                    
                     {form.is_recurring && (
                       <div className="animate-in fade-in slide-in-from-top-1">
                         <label className="text-[10px] font-black text-amber-700 uppercase mb-1 block">Total de Parcelas (Meses)</label>
@@ -373,7 +357,6 @@ export default function Appointments({ clinic }: Props) {
                 )}
               </div>
             )}
-
             <div className="flex gap-3 pt-2">
               <button onClick={() => setModalOpen(false)} className="flex-1 border-2 border-gray-100 py-3 rounded-xl text-sm font-black text-gray-400 uppercase hover:bg-gray-50 transition-all">Cancelar</button>
               <button onClick={handleSave} disabled={saving || !form.title} className="flex-1 text-white py-3 rounded-xl text-sm font-black uppercase shadow-lg disabled:opacity-50 transition-all active:scale-95" style={{ backgroundColor: clinic.color }}>
